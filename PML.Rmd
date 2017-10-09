@@ -1,0 +1,154 @@
+---
+title: "Practical Machine Learning"
+author: "Joe Sopko"
+date: "10/8/2017"
+---
+
+## I. Overview
+This document is the final report of the Peer Assessment project from Coursera’s course Practical Machine Learning, as part of the Specialization in Data Science. 
+This analysis will be used for the course quiz and the prediction assignment writeup. The main goal of the project is to predict the manner in which 6 participants performed some exercise as described below. This is the “classe” variable in the training set. The machine learning algorithm described here is applied to the 20 test cases available in the test data and the predictions are submitted in appropriate format to the Course Project Prediction Quiz for automated grading.
+
+## II. Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3xsbS5bVX
+
+## III. Data Loading and Exploratory Analysis
+
+# a) Dataset Overview
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project is from http://groupware.les.inf.puc-rio.br/har. 
+
+# b) Environment Preparation
+
+We first upload the R libraries that are necessary for the complete analysis.
+```{r, echo=FALSE, results='markup'}
+setwd("/Users/joesopko/Downloads/Joe/Coursera/Data Science Specialization/08 - Practical Machine Learning - PML/WEEK 4/Course Project")
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+```
+
+```{r, echo=FALSE, results='hide'}
+setwd("/Users/joesopko/Downloads/Joe/Coursera/Data Science Specialization/08 - Practical Machine Learning - PML/WEEK 4/Course Project")
+```
+
+# c) Data Loading and Cleaning
+
+```{r, results='markup', warning=FALSE, message=FALSE}
+
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+
+training <- training[, 7:160]
+testing  <- testing[, 7:160]
+
+is_data  <- apply(!is.na(training), 2, sum) > 19621  # which is the number of observations
+training <- training[, is_data]
+testing  <- testing[, is_data]
+
+set.seed(7054110)
+inTrain <- createDataPartition(y=training$classe, p=0.60, list=FALSE)
+train1  <- training[inTrain,]
+train2  <- training[-inTrain,]
+dim(train1)
+
+dim(train2)
+
+nzv_cols <- nearZeroVar(train1)
+if(length(nzv_cols) > 0) {
+  train1 <- train1[, -nzv_cols]
+  train2 <- train2[, -nzv_cols]
+}
+dim(train1)
+
+dim(train2)
+
+```
+
+# d) Data Manipulation
+
+```{r, results='markup', warning=FALSE, message=FALSE}
+set.seed(7054110)
+fitModel <- randomForest(classe~., data=train1, importance=TRUE, ntree=100)
+varImpPlot(fitModel)
+
+correl = cor(train1[,c("yaw_belt","roll_belt","num_window","pitch_belt","magnet_dumbbell_z","magnet_dumbbell_y","pitch_forearm","accel_dumbbell_y","roll_arm","roll_forearm")])
+diag(correl) <- 0
+which(abs(correl)>0.75, arr.ind=TRUE)
+
+cor(train1$roll_belt, train1$yaw_belt)
+
+qplot(roll_belt, magnet_dumbbell_y, colour=classe, data=train1)
+
+fitModel <- rpart(classe~., data=train1, method="class")
+prp(fitModel)
+```
+
+# e) Data Modeling
+
+```{r, results='markup', warning=FALSE, message=FALSE}
+set.seed(7054110)
+fitModel <- train(classe~roll_belt+num_window+pitch_belt+magnet_dumbbell_y+magnet_dumbbell_z+pitch_forearm+accel_dumbbell_y+roll_arm+roll_forearm,
+                  data=train1,
+                  method="rf",
+                  trControl=trainControl(method="cv",number=2),
+                  prox=TRUE,
+                  verbose=TRUE,
+                  allowParallel=TRUE)
+
+#saveRDS(fitModel, "modelRF.Rds")
+#fitModel <- readRDS("modelRF.Rds")
+
+predictions <- predict(fitModel, newdata=train2)
+confusionMat <- confusionMatrix(predictions, train2$classe)
+confusionMat
+
+missClass = function(values, predicted) {
+  sum(predicted != values) / length(values)
+}
+OOS_errRate = missClass(train2$classe, predictions)
+OOS_errRate
+```
+
+# f) Submission
+
+```{r, results='markup', warning=FALSE, message=FALSE}
+
+predictions <- predict(fitModel, newdata=testing)
+testing$classe <- predictions
+
+submit <- data.frame(problem_id = testing$problem_id, classe = predictions)
+write.csv(submit, file = "coursera-submission.csv", row.names = FALSE)
+
+
+answers = testing$classe
+write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_",i,".txt")
+    write.table(x[i], file=filename, quote=FALSE, row.names=FALSE, col.names=FALSE)
+  }
+}
+write_files(answers)
+
+```
+
+## IV. Conclusion
+In this assignment, we accurately predicted the classification of 20 observations using a Random Forest algorithm trained on a subset of data using less than 20% of the covariates.
+
+The accuracy we obtained (accuracy = 99.68%, and out-of-sample error = 0.32%) 
